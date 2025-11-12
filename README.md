@@ -19,9 +19,32 @@ SALESLOFT_API_KEY=your_api_key_here
 
 ### 3. Run the Script
 
+**Option A: Test Mode (Quick Test - 15 transcripts)**
 ```bash
-npm start
+npm test
 ```
+
+**Option B: Batch Mode (Get ALL transcripts)**
+```bash
+npm run batch
+```
+
+Run batch mode multiple times to process all your calls:
+```bash
+npm run batch  # Run 1: Processes first batch
+npm run batch  # Run 2: Processes next batch (auto-skips duplicates)
+npm run batch  # Run 3: Continue until all calls processed
+```
+
+**Option C: Clean & Reset (Start fresh)**
+```bash
+npm run clean  # Resets the tracker (backs up old data)
+npm run batch  # Re-download all transcripts
+```
+
+**📖 New to this?**
+- **[HOW_IT_WORKS.md](./HOW_IT_WORKS.md)** - **START HERE!** Explains the tracking system & when to use each command
+- **[WHEN_TO_RUN.md](./docs/WHEN_TO_RUN.md)** - Quick reference guide
 
 ## What the Script Does
 
@@ -34,13 +57,35 @@ npm start
    - Saves as text files locally and uploads to Google Drive
 5. Provides detailed progress tracking and summary statistics
 
+## Which Mode Should I Use?
+
+| Feature | Test Mode (`npm test`) | Batch Mode (`npm run batch`) | Clean Mode (`npm run clean`) |
+|---------|----------------------|----------------------------|----------------------------|
+| **Purpose** | Quick testing | Production data extraction | Reset & start fresh |
+| **Transcripts** | Stops at 15 | Unlimited (all available) | Clears tracker (no download) |
+| **Records Scanned** | 100 per run | 500 per run | N/A |
+| **Use Case** | Initial setup, spot-checking | Full historical backfill, ongoing sync | After bug fix, reset needed |
+| **Duplicate Prevention** | ✅ Yes | ✅ Yes | N/A (clears all history) |
+| **Run Multiple Times** | ✅ Yes | ✅ Yes (recommended) | Only when needed |
+
 ## Configuration
 
-You can adjust these settings at the top of `main()` in `index.js`:
+Settings are in `config.js` - you can adjust without modifying the main scripts:
 
 ```javascript
-const MAX_RECORDS_TO_FETCH = 100; // How many call records to fetch
-const MIN_DURATION = 30;           // Minimum call duration in seconds
+// Test mode settings
+test: {
+  TARGET_AI_TRANSCRIPTS: 15,  // Stop after finding 15
+  MAX_RECORDS_TO_SCAN: 100,   // Scan 100 records per run
+  MIN_DURATION: 30,            // Minimum call duration (seconds)
+}
+
+// Batch mode settings
+batch: {
+  MAX_RECORDS_TO_SCAN: 500,   // Scan 500 records per run
+  MIN_DURATION: 30,            // Minimum call duration (seconds)
+  API_DELAY_MS: 100,           // 100ms delay = 10 calls/sec
+}
 ```
 
 ## Output
@@ -90,7 +135,7 @@ Once the transcripts are downloaded to your computer, you can:
 
 ## How AI Transcripts Work
 
-See [EXPLAINED.md](./EXPLAINED.md) for a detailed technical explanation of:
+See [EXPLAINED.md](./docs/EXPLAINED.md) for a detailed technical explanation of:
 - The 3-step API process (Call Data → Conversation → Sentences)
 - How AI transcripts are detected and distinguished from manual notes
 - JSON schemas for each API endpoint
@@ -106,3 +151,25 @@ See [EXPLAINED.md](./EXPLAINED.md) for a detailed technical explanation of:
 ### "Error downloading recording"
 - The recording URL may have expired or be inaccessible
 - Check your network connection
+
+### "Duplicate transcripts with different call IDs"
+- This was a bug in earlier versions (now fixed!)
+- Run `npm run clean` to reset the tracker
+- Then run `npm run batch` to re-download with the fix
+
+---
+
+## 📚 Documentation
+
+Comprehensive guides are available in the `docs/` folder:
+
+### Getting Started
+- **[WHEN_TO_RUN.md](./docs/WHEN_TO_RUN.md)** - **START HERE!** Simple guide on when to use each command
+- **[QUICK_START.md](./docs/QUICK_START.md)** - Workflows, verification steps, and troubleshooting
+
+### Advanced Topics
+- **[BATCHING_GUIDE.md](./docs/BATCHING_GUIDE.md)** - Advanced batching strategies and scheduling
+- **[EXPLAINED.md](./docs/EXPLAINED.md)** - Technical deep-dive on API architecture and data flows
+
+### Production Deployment
+- **[NEXT_STEPS.md](./docs/NEXT_STEPS.md)** - 🚀 Roadmap for automated deployment on Render
