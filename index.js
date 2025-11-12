@@ -20,30 +20,58 @@ const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const DOWNLOAD_FOLDER = './recordings';
 
 /**
- * Fetch transcripts from Salesloft API
+ * Fetch transcripts from Salesloft API with pagination support
  */
-async function fetchTranscripts() {
+async function fetchTranscripts(maxRecords = 100) {
   try {
-    console.log('Fetching transcripts from Salesloft...');
+    console.log(`Fetching up to ${maxRecords} call records from Salesloft...`);
 
-    const response = await axios.get(`${SALESLOFT_API_URL}/call_data_records.json`, {
-      headers: {
-        'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      params: {
-        has_recording: true, // Only get calls with recordings
-        per_page: 10 // Get more to find one with actual conversation
+    let allRecords = [];
+    let currentPage = 1;
+    const perPage = 100; // Max allowed per page
+
+    while (allRecords.length < maxRecords) {
+      const response = await axios.get(`${SALESLOFT_API_URL}/call_data_records.json`, {
+        headers: {
+          'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        params: {
+          has_recording: true, // Only get calls with recordings
+          per_page: perPage,
+          page: currentPage
+        }
+      });
+
+      const records = response.data.data || [];
+      if (records.length === 0) {
+        break; // No more records
       }
-    });
 
-    console.log(`Found ${response.data.data.length} call records`);
+      allRecords = allRecords.concat(records);
 
-    // Save raw response for debugging
-    fs.writeFileSync('./debug_response.json', JSON.stringify(response.data, null, 2));
-    console.log('Raw API response saved to debug_response.json');
+      // Check if there are more pages
+      const metadata = response.data.metadata;
+      if (!metadata?.paging?.next_page) {
+        break; // No more pages
+      }
 
-    return response.data.data;
+      currentPage++;
+      console.log(`  Fetched page ${currentPage - 1}, got ${records.length} records (total: ${allRecords.length})`);
+    }
+
+    // Trim to max records if we got more
+    if (allRecords.length > maxRecords) {
+      allRecords = allRecords.slice(0, maxRecords);
+    }
+
+    console.log(`\nFound ${allRecords.length} total call records`);
+
+    // Save raw response for debugging (just first page)
+    fs.writeFileSync('./debug_response.json', JSON.stringify({ data: allRecords.slice(0, 10) }, null, 2));
+    console.log('Sample API response saved to debug_response.json');
+
+    return allRecords;
   } catch (error) {
     console.error('Error fetching transcripts:', error.response?.data || error.message);
     throw error;
@@ -109,20 +137,45 @@ async function fetchNoteContent(noteId) {
 
 /**
  * Fetch transcription sentences (the actual transcript text)
+ * Handles pagination to ensure we get ALL sentences
  */
 async function fetchTranscriptionSentences(transcriptionId) {
   try {
-    const response = await axios.get(`${SALESLOFT_API_URL}/transcriptions/${transcriptionId}/sentences.json`, {
-      headers: {
-        'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      params: {
-        per_page: 100 // Get up to 100 sentences per page
-      }
-    });
+    let allSentences = [];
+    let currentPage = 1;
+    let totalPages = 1;
 
-    return response.data;
+    do {
+      const response = await axios.get(`${SALESLOFT_API_URL}/transcriptions/${transcriptionId}/sentences.json`, {
+        headers: {
+          'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        params: {
+          per_page: 100, // Max per page
+          page: currentPage
+        }
+      });
+
+      const sentences = response.data.data || [];
+      allSentences = allSentences.concat(sentences);
+
+      // Check pagination metadata
+      if (response.data.metadata && response.data.metadata.paging) {
+        const paging = response.data.metadata.paging;
+        totalPages = Math.ceil(paging.total_count / paging.per_page) || 1;
+
+        if (currentPage === 1 && totalPages > 1) {
+          console.log(`  [AI TRANSCRIPT] Transcript spans ${totalPages} pages, fetching all...`);
+        }
+      }
+
+      currentPage++;
+    } while (currentPage <= totalPages);
+
+    console.log(`  [AI TRANSCRIPT] Retrieved ${allSentences.length} total sentences from ${totalPages} page(s)`);
+
+    return { data: allSentences };
   } catch (error) {
     console.error(`Error fetching transcription sentences ${transcriptionId}:`, error.message);
     throw error;
@@ -436,11 +489,16 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth)
 
     // Determine the type of content
     let contentType = 'no transcript found';
+    let isAITranscript = false;
+    let isManualNote = false;
+
     if (foundTranscript) {
       if (content.includes('[AI TRANSCRIPT]') || content.includes('AI-generated')) {
         contentType = '✅ AI TRANSCRIPT';
+        isAITranscript = true;
       } else if (content.includes('[MANUAL NOTE')) {
         contentType = '⚠️  MANUAL NOTE ONLY';
+        isManualNote = true;
       } else {
         contentType = 'transcript data (unknown type)';
       }
@@ -457,7 +515,13 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth)
       }
     }
 
-    return { fileName, filePath, hasTranscript: foundTranscript };
+    return {
+      fileName,
+      filePath,
+      hasTranscript: foundTranscript,
+      isAITranscript,
+      isManualNote
+    };
   } catch (error) {
     console.error(`Error saving transcript for call ${callId}:`, error.message);
     throw error;
@@ -469,34 +533,48 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth)
  */
 async function main() {
   try {
-    // Step 1: Fetch call records from Salesloft
-    const callRecords = await fetchTranscripts();
+    // Configuration - adjust these values as needed
+    const TARGET_AI_TRANSCRIPTS = 15; // Keep fetching until we find this many AI transcripts
+    const MAX_RECORDS_TO_SCAN = 50; // Safety limit: don't scan more than this many records (temporarily lowered for debugging)
+    const MIN_DURATION = 30; // Minimum call duration in seconds
+
+    console.log(`\n🎯 TARGET: Find ${TARGET_AI_TRANSCRIPTS} calls with AI transcripts (scanning up to ${MAX_RECORDS_TO_SCAN} records)\n`);
+
+    // Step 1: Fetch call records from Salesloft (will fetch all we need)
+    const callRecords = await fetchTranscripts(MAX_RECORDS_TO_SCAN);
 
     if (callRecords.length === 0) {
       console.log('No call records found.');
       return;
     }
 
-    // Step 2: Check for calls with activity IDs or dialer recordings
-    console.log('\n=== CHECKING FOR TRANSCRIPT SOURCES ===\n');
+    // Step 2: Apply smart filtering
+    console.log('\n=== APPLYING SMART FILTERS ===\n');
 
     const recordsToProcess = callRecords.filter(t => {
-      const hasCallActivity = t.call && t.call.id;
-      const hasDialerRecording = t.dialer_recording && t.dialer_recording.uuid;
-
-      if (hasCallActivity) {
-        console.log(`Call ${t.id}: ✓ Has call activity ID ${t.call.id}`);
-        return true;
-      } else if (hasDialerRecording) {
-        console.log(`Call ${t.id}: ✓ Has dialer recording ${t.dialer_recording.uuid}`);
-        return true;
-      } else {
-        console.log(`Call ${t.id}: ✗ No transcript source`);
+      // Filter 1: Must be completed
+      if (t.status !== 'completed') {
+        console.log(`Call ${t.id}: ✗ Status is '${t.status}' (not completed)`);
         return false;
       }
+
+      // Filter 2: Must have sufficient duration
+      if (!t.duration || t.duration < MIN_DURATION) {
+        console.log(`Call ${t.id}: ✗ Duration ${t.duration}s is below minimum ${MIN_DURATION}s`);
+        return false;
+      }
+
+      // Filter 3: Must have call activity (needed to fetch conversation)
+      if (!t.call || !t.call.id) {
+        console.log(`Call ${t.id}: ✗ No call activity ID`);
+        return false;
+      }
+
+      console.log(`Call ${t.id}: ✓ Passed filters (status: ${t.status}, duration: ${t.duration}s)`);
+      return true;
     });
 
-    console.log(`\n${recordsToProcess.length} out of ${callRecords.length} records have transcript sources\n`);
+    console.log(`\n${recordsToProcess.length} out of ${callRecords.length} records passed filters\n`);
 
     if (recordsToProcess.length === 0) {
       console.log('No calls to process.');
@@ -525,61 +603,118 @@ async function main() {
 
     let successCount = 0;
     let failCount = 0;
-    let withTranscriptCount = 0;
+    let aiTranscriptCount = 0;
+    let manualNoteCount = 0;
+    let noTranscriptCount = 0;
+    let skippedNoAICount = 0;
 
-    for (const record of recordsToProcess) {
+    for (let i = 0; i < recordsToProcess.length; i++) {
+      // Check if we've reached our target
+      if (aiTranscriptCount >= TARGET_AI_TRANSCRIPTS) {
+        console.log(`\n🎉 TARGET REACHED! Found ${aiTranscriptCount} AI transcripts. Stopping.\n`);
+        break;
+      }
+
+      const record = recordsToProcess[i];
+      const progress = `[${i + 1}/${recordsToProcess.length}] (Found: ${aiTranscriptCount}/${TARGET_AI_TRANSCRIPTS})`;
+
       try {
-        console.log(`\nProcessing call ID: ${record.id}`);
+        console.log(`\n${progress} Processing call ID: ${record.id}`);
 
+        // STEP 1: Check if this call has an AI transcript by fetching the conversation
+        let conversationData = null;
+        try {
+          conversationData = await listConversations(record.id);
+
+          // DEBUG: Log what we got back
+          if (i < 3) { // Only log first 3 to avoid spam
+            console.log(`  [DEBUG] Conversation response:`, JSON.stringify(conversationData, null, 2));
+          }
+        } catch (error) {
+          console.log(`  ✗ Could not fetch conversation: ${error.message}`);
+          failCount++;
+          continue;
+        }
+
+        // Check if conversation has transcription_id
+        if (!conversationData || !conversationData.data || conversationData.data.length === 0) {
+          console.log(`  ✗ No conversation found for this call`);
+          skippedNoAICount++;
+          continue;
+        }
+
+        const conversation = conversationData.data[0];
+
+        // DEBUG: Show all conversation fields
+        if (i < 3) {
+          console.log(`  [DEBUG] Conversation fields:`, Object.keys(conversation));
+          console.log(`  [DEBUG] transcription object:`, conversation.transcription);
+        }
+
+        // Check for transcription - it's an object with an 'id' field, not a direct transcription_id
+        const transcription = conversation.transcription;
+        const hasAITranscript = transcription && transcription.id ? true : false;
+
+        if (!hasAITranscript) {
+          console.log(`  ⊘ No AI transcript available - skipping`);
+          skippedNoAICount++;
+          continue;
+        }
+
+        const transcriptionId = transcription.id;
+        console.log(`  ✓ AI transcript available (transcription ID: ${transcriptionId})`);
+
+        // STEP 2: Fetch the actual call activity data (for metadata)
         let transcriptData = null;
-
-        // Try fetching from call activity first
-        if (record.call && record.call.id) {
-          try {
-            console.log(`  Trying call activity ${record.call.id}...`);
-            transcriptData = await fetchTranscriptFromCall(record.call.id);
-            console.log(`  ✓ Fetched from call activity`);
-          } catch (error) {
-            console.log(`  ✗ Call activity fetch failed: ${error.message}`);
-          }
+        try {
+          console.log(`  Fetching call activity metadata...`);
+          transcriptData = await fetchTranscriptFromCall(record.call.id);
+        } catch (error) {
+          console.log(`  ✗ Call activity fetch failed: ${error.message}`);
+          failCount++;
+          continue;
         }
 
-        // If that didn't work, try dialer recording
-        if (!transcriptData && record.dialer_recording && record.dialer_recording.uuid) {
-          try {
-            console.log(`  Trying dialer recording ${record.dialer_recording.uuid}...`);
-            transcriptData = await fetchTranscriptFromDialerRecording(record.dialer_recording.uuid);
-            console.log(`  ✓ Fetched from dialer recording`);
-          } catch (error) {
-            console.log(`  ✗ Dialer recording fetch failed: ${error.message}`);
-          }
+        // STEP 3: Save transcript to file (the saveTranscriptToFile function will fetch the sentences)
+        const { fileName, hasTranscript, isAITranscript, isManualNote } = await saveTranscriptToFile(
+          record.id,
+          transcriptData,
+          record,
+          driveAuth
+        );
+
+        if (isAITranscript) {
+          aiTranscriptCount++;
+        } else if (isManualNote) {
+          manualNoteCount++;
+        } else if (!hasTranscript) {
+          noTranscriptCount++;
         }
 
-        if (!transcriptData) {
-          throw new Error('No transcript data available from any source');
-        }
-
-        // Save transcript to file (and upload to Google Drive)
-        const { fileName, hasTranscript } = await saveTranscriptToFile(record.id, transcriptData, record, driveAuth);
-
-        if (hasTranscript) {
-          withTranscriptCount++;
-        }
         successCount++;
       } catch (error) {
-        console.error(`✗ Failed to process call ${record.id}:`, error.message);
+        console.error(`  ✗ Failed to process call ${record.id}:`, error.message);
         failCount++;
       }
     }
 
     console.log(`\n=== SUMMARY ===`);
-    console.log(`✓ Successfully saved: ${successCount} files`);
-    console.log(`✓ With actual transcript text: ${withTranscriptCount}`);
-    console.log(`⚠ Without transcript text: ${successCount - withTranscriptCount}`);
+    console.log(`🎯 Target: ${TARGET_AI_TRANSCRIPTS} AI transcripts`);
+    console.log(`✅ Found: ${aiTranscriptCount} AI transcripts`);
+    console.log(`\n📊 Details:`);
+    console.log(`  ✓ Successfully processed: ${successCount} calls`);
+    console.log(`  ⚠️  With manual notes only: ${manualNoteCount}`);
+    console.log(`  ❌ Without any transcript: ${noTranscriptCount}`);
+    console.log(`  ⊘ Skipped (no AI transcript): ${skippedNoAICount}`);
     if (failCount > 0) {
-      console.log(`✗ Failed: ${failCount} calls`);
+      console.log(`  ✗ Failed: ${failCount} calls`);
     }
-    console.log(`\nFiles saved to: ${path.resolve(DOWNLOAD_FOLDER)}`);
+    console.log(`\n📁 Files saved to: ${path.resolve(DOWNLOAD_FOLDER)}`);
+
+    if (aiTranscriptCount < TARGET_AI_TRANSCRIPTS) {
+      console.log(`\n⚠️  Only found ${aiTranscriptCount}/${TARGET_AI_TRANSCRIPTS} AI transcripts.`);
+      console.log(`   Consider increasing MAX_RECORDS_TO_SCAN or checking if transcription is enabled in Salesloft.`);
+    }
 
   } catch (error) {
     console.error('Fatal error:', error);

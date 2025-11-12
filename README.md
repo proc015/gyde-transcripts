@@ -25,10 +25,23 @@ npm start
 
 ## What the Script Does
 
-1. Fetches call data records from Salesloft API (calls with dialer recordings)
-2. For each call, fetches the transcript text from the dialer recording
-3. Saves transcripts as text files in the `./recordings` folder
-4. Provides progress feedback and a summary
+1. Fetches call data records from Salesloft API with pagination support
+2. Applies smart filtering (completed calls, minimum duration, has activity ID)
+3. Checks for AI transcripts early to skip calls without transcription_id
+4. For calls with AI transcripts:
+   - Fetches ALL sentence pages (handles pagination automatically)
+   - Combines sentences into complete conversation transcripts
+   - Saves as text files locally and uploads to Google Drive
+5. Provides detailed progress tracking and summary statistics
+
+## Configuration
+
+You can adjust these settings at the top of `main()` in `index.js`:
+
+```javascript
+const MAX_RECORDS_TO_FETCH = 100; // How many call records to fetch
+const MIN_DURATION = 30;           // Minimum call duration in seconds
+```
 
 ## Output
 
@@ -36,8 +49,26 @@ npm start
 - File naming format: `transcript_call_{callId}_{timestamp}.txt`
 - Each file includes:
   - Call metadata (ID, date, duration, phone numbers)
-  - Full transcript text
-- The script processes 5 calls at a time by default (change `per_page` in index.js to adjust)
+  - **Complete** AI-generated transcript text (all sentences, paginated automatically)
+
+### Console Output Indicators
+
+- `✅ AI TRANSCRIPT` - Full conversation transcript from AI speech-to-text
+- `⚠️ MANUAL NOTE ONLY` - User-typed summary (not conversation transcript)
+- `⊘ Skipped (no AI transcript)` - Call had no transcription_id, skipped early
+
+### Summary Statistics
+
+The script provides detailed statistics:
+```
+=== SUMMARY ===
+✓ Successfully processed: 8 calls
+  ✅ With AI transcripts: 5
+  ⚠️  With manual notes only: 2
+  ❌ Without any transcript: 1
+⊘ Skipped (no AI transcript): 32
+✗ Failed: 0 calls
+```
 
 ## After Download
 
@@ -49,10 +80,22 @@ Once the transcripts are downloaded to your computer, you can:
 
 ## Notes
 
-- The script only processes calls with dialer recordings that have transcripts
+- **Smart Filtering**: Only processes completed calls with minimum 30s duration
+- **AI Transcript Detection**: Automatically checks for `transcription_id` and skips calls without AI transcripts
+- **Complete Transcripts**: Handles pagination automatically to fetch ALL sentences (no truncation)
+- **Efficient**: Skips calls early if no AI transcript exists, saving ~80% of API calls
+- **Google Drive Upload**: Files are saved locally first, then uploaded to Google Drive
 - Files are plain text (.txt format)
-- The script will skip any calls without dialer recordings
 - If a transcript fails to download, the script continues with the next one
+
+## How AI Transcripts Work
+
+See [EXPLAINED.md](./EXPLAINED.md) for a detailed technical explanation of:
+- The 3-step API process (Call Data → Conversation → Sentences)
+- How AI transcripts are detected and distinguished from manual notes
+- JSON schemas for each API endpoint
+- Pagination handling for complete transcripts
+- Scaling and performance optimizations
 
 ## Troubleshooting
 
