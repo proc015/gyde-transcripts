@@ -2,6 +2,8 @@
 .env*
 node_modules/
 credentials.json
+oauth_credentials.json
+token.json
 debug_response.json
 recordings/
 .DS_Store

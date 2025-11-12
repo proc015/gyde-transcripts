@@ -1,6 +1,6 @@
-# Salesloft Call Transcripts Downloader
+# Salesloft Call Transcripts to Google Drive
 
-This script pulls call transcript TEXT from Salesloft via their API and saves them as text files locally.
+This script pulls call transcript TEXT from Salesloft via their API and uploads them to Google Drive.
 
 ## Setup Instructions
 

@@ -2,14 +2,21 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import { pipeline } from 'stream/promises';
+import { google } from 'googleapis';
+import { Readable } from 'stream';
 
 dotenv.config();
 
 const SALESLOFT_API_KEY = process.env.SALESLOFT_API_KEY;
 const SALESLOFT_API_URL = 'https://api.salesloft.com/v2';
 
-// Local download folder
+// Google Drive configuration
+const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+const OAUTH_CREDENTIALS_PATH = './oauth_credentials.json';
+const TOKEN_PATH = './token.json';
+const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+
+// Local download folder (for backup/debugging)
 const DOWNLOAD_FOLDER = './recordings';
 
 /**
@@ -173,9 +180,98 @@ async function listConversations(callDataRecordId) {
 }
 
 /**
+ * Authorize with Google Drive using OAuth
+ */
+async function authorizeGoogleDrive() {
+  try {
+    // Load OAuth credentials
+    const credentials = JSON.parse(fs.readFileSync(OAUTH_CREDENTIALS_PATH, 'utf8'));
+    const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
+
+    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+
+    // Check if we have a saved token
+    if (fs.existsSync(TOKEN_PATH)) {
+      const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+      oAuth2Client.setCredentials(token);
+      return oAuth2Client;
+    }
+
+    // If no token, we need to authorize
+    const authUrl = oAuth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: SCOPES,
+    });
+
+    console.log('\n⚠️  AUTHORIZATION REQUIRED ⚠️');
+    console.log('\nPlease authorize this app by visiting this URL:\n');
+    console.log(authUrl);
+    console.log('\nAfter authorizing, you will get a code.');
+    console.log('Paste the code here and press Enter:\n');
+
+    // Wait for user input
+    const code = await new Promise((resolve) => {
+      process.stdin.once('data', (data) => {
+        resolve(data.toString().trim());
+      });
+    });
+
+    // Get token from code
+    const { tokens } = await oAuth2Client.getToken(code);
+    oAuth2Client.setCredentials(tokens);
+
+    // Save token for future use
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
+    console.log('\n✓ Token saved! You won\'t need to authorize again.\n');
+
+    return oAuth2Client;
+  } catch (error) {
+    console.error('Error authorizing with Google Drive:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Upload text content to Google Drive
+ */
+async function uploadToGoogleDrive(authClient, fileName, textContent) {
+  try {
+    const drive = google.drive({ version: 'v3', auth: authClient });
+
+    // Create a readable stream from the text content
+    const bufferStream = new Readable();
+    bufferStream.push(textContent);
+    bufferStream.push(null);
+
+    const fileMetadata = {
+      name: fileName,
+      parents: [GOOGLE_DRIVE_FOLDER_ID], // Upload to the shared folder
+      mimeType: 'text/plain'
+    };
+
+    const media = {
+      mimeType: 'text/plain',
+      body: bufferStream
+    };
+
+    const response = await drive.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: 'id, name, webViewLink'
+    });
+
+    console.log(`    ✓ Uploaded to Google Drive: ${response.data.name}`);
+    return response.data;
+  } catch (error) {
+    console.error(`    ✗ Google Drive upload failed: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
  * Save transcript to file
  */
-async function saveTranscriptToFile(callId, transcriptData, callInfo) {
+async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth) {
   try {
     // Ensure download folder exists
     if (!fs.existsSync(DOWNLOAD_FOLDER)) {
@@ -335,6 +431,7 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo) {
       content += JSON.stringify(transcriptData, null, 2);
     }
 
+    // Save locally first (for backup)
     fs.writeFileSync(filePath, content, 'utf8');
 
     // Determine the type of content
@@ -349,7 +446,17 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo) {
       }
     }
 
-    console.log(`  ✓ Saved: ${fileName} (${contentType})`);
+    console.log(`  ✓ Saved locally: ${fileName} (${contentType})`);
+
+    // Upload to Google Drive
+    if (driveAuth && GOOGLE_DRIVE_FOLDER_ID) {
+      try {
+        await uploadToGoogleDrive(driveAuth, fileName, content);
+      } catch (error) {
+        console.log(`  ⚠️  Google Drive upload failed, but file is saved locally`);
+      }
+    }
+
     return { fileName, filePath, hasTranscript: foundTranscript };
   } catch (error) {
     console.error(`Error saving transcript for call ${callId}:`, error.message);
@@ -396,7 +503,24 @@ async function main() {
       return;
     }
 
-    // Step 3: Fetch and save transcripts
+    // Step 3: Authorize with Google Drive
+    let driveAuth = null;
+    if (GOOGLE_DRIVE_FOLDER_ID) {
+      try {
+        console.log('=== AUTHORIZING GOOGLE DRIVE ===\n');
+        driveAuth = await authorizeGoogleDrive();
+        console.log('✓ Authorized with Google Drive');
+        console.log(`✓ Will upload to folder: ${GOOGLE_DRIVE_FOLDER_ID}\n`);
+      } catch (error) {
+        console.log(`⚠️  Google Drive authorization failed: ${error.message}`);
+        console.log(`Files will be saved locally only.\n`);
+      }
+    } else {
+      console.log('⚠️  GOOGLE_DRIVE_FOLDER_ID not set in .env');
+      console.log(`Files will be saved locally only.\n`);
+    }
+
+    // Step 4: Fetch and save transcripts
     console.log('=== FETCHING TRANSCRIPTS ===\n');
 
     let successCount = 0;
@@ -435,8 +559,8 @@ async function main() {
           throw new Error('No transcript data available from any source');
         }
 
-        // Save transcript to file
-        const { fileName, hasTranscript } = await saveTranscriptToFile(record.id, transcriptData, record);
+        // Save transcript to file (and upload to Google Drive)
+        const { fileName, hasTranscript } = await saveTranscriptToFile(record.id, transcriptData, record, driveAuth);
 
         if (hasTranscript) {
           withTranscriptCount++;
