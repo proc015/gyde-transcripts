@@ -1,0 +1,7 @@
+.env
+.env*
+node_modules/
+credentials.json
+debug_response.json
+recordings/
+.DS_Store
