@@ -8,6 +8,7 @@
     "start": "node index.js",
     "test": "node test.js",
     "batch": "node batch.js",
+    "analyze": "node analyze.js",
     "clean": "node clean.js",
     "verify": "node verify.js"
   },
