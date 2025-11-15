@@ -20,6 +20,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const DOWNLOAD_FOLDER = './recordings';
 const PROCESSED_IDS_FILE = './processed_conversation_ids.json';
 const LEGACY_PROCESSED_IDS_FILE = './processed_call_ids.json';
+const MAPPING_CSV_FILE = './transcript_salesforce_mapping.csv';
 
 /**
  * Load processed conversation IDs and pagination state from file
@@ -194,6 +195,44 @@ async function fetchNoteContent(noteId) {
   } catch (error) {
     console.error(`Error fetching note ${noteId}:`, error.message);
     throw error;
+  }
+}
+
+/**
+ * Fetch person details including Salesforce CRM ID
+ */
+async function fetchPersonDetails(personId) {
+  try {
+    const response = await axios.get(`${SALESLOFT_API_URL}/people/${personId}.json`, {
+      headers: {
+        'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching person ${personId}:`, error.message);
+    return null; // Return null instead of throwing to handle gracefully
+  }
+}
+
+/**
+ * Fetch account details including Salesforce CRM ID
+ */
+async function fetchAccountDetails(accountId) {
+  try {
+    const response = await axios.get(`${SALESLOFT_API_URL}/accounts/${accountId}.json`, {
+      headers: {
+        'Authorization': `Bearer ${SALESLOFT_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching account ${accountId}:`, error.message);
+    return null; // Return null instead of throwing to handle gracefully
   }
 }
 
@@ -398,9 +437,30 @@ async function uploadToGoogleDrive(authClient, fileName, textContent) {
 }
 
 /**
+ * Save mapping record to CSV file
+ */
+function saveMappingRecord(record) {
+  try {
+    const csvHeaders = 'ConversationID,Filename,PersonID,PersonCrmID,AccountID,AccountCrmID,MediaType,Platform,Date,Duration\n';
+    const csvRow = `${record.conversationId},${record.filename},${record.personId || ''},${record.personCrmId || ''},${record.accountId || ''},${record.accountCrmId || ''},${record.mediaType || ''},${record.platform || ''},${record.date || ''},${record.duration || ''}\n`;
+
+    // Create file with headers if it doesn't exist
+    if (!fs.existsSync(MAPPING_CSV_FILE)) {
+      fs.writeFileSync(MAPPING_CSV_FILE, csvHeaders, 'utf8');
+      console.log(`  📊 Created mapping file: ${MAPPING_CSV_FILE}`);
+    }
+
+    // Append the record
+    fs.appendFileSync(MAPPING_CSV_FILE, csvRow, 'utf8');
+  } catch (error) {
+    console.error(`  ⚠️  Failed to save mapping record: ${error.message}`);
+  }
+}
+
+/**
  * Save transcript to file
  */
-async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth, transcriptionId = null) {
+async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth, transcriptionId = null, crmData = null) {
   try {
     // Ensure download folder exists
     if (!fs.existsSync(DOWNLOAD_FOLDER)) {
@@ -425,6 +485,14 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth,
     content += `Duration: ${callInfo.duration || 'N/A'} seconds\n`;
     content += `Media Type: ${mediaType}\n`;
     content += `Platform: ${platform}\n`;
+
+    // Add Salesforce CRM IDs if available
+    if (crmData) {
+      if (crmData.personCrmId) content += `Salesforce Contact/Lead ID: ${crmData.personCrmId}\n`;
+      if (crmData.accountCrmId) content += `Salesforce Account ID: ${crmData.accountCrmId}\n`;
+      if (crmData.personId) content += `SalesLoft Person ID: ${crmData.personId}\n`;
+      if (crmData.accountId) content += `SalesLoft Account ID: ${crmData.accountId}\n`;
+    }
 
     // Add call-specific fields if available
     if (callInfo.from) content += `From: ${callInfo.from}\n`;
@@ -616,6 +684,22 @@ async function saveTranscriptToFile(callId, transcriptData, callInfo, driveAuth,
       }
     }
 
+    // Save to CSV mapping file
+    if (crmData) {
+      saveMappingRecord({
+        conversationId: callId,
+        filename: fileName,
+        personId: crmData.personId,
+        personCrmId: crmData.personCrmId,
+        accountId: crmData.accountId,
+        accountCrmId: crmData.accountCrmId,
+        mediaType: mediaType,
+        platform: platform,
+        date: callInfo.created_at,
+        duration: callInfo.duration
+      });
+    }
+
     return {
       fileName,
       filePath,
@@ -777,13 +861,49 @@ async function main(config = null) {
         const transcriptionId = record.transcription.id;
         console.log(`  📝 Transcription ID: ${transcriptionId}`);
 
+        // Fetch Person and Account CRM IDs
+        let crmData = null;
+        if (record.person || record.account) {
+          crmData = {
+            personId: record.person?.id || null,
+            accountId: record.account?.id || null,
+            personCrmId: null,
+            accountCrmId: null
+          };
+
+          // Fetch person details if available
+          if (record.person?.id) {
+            console.log(`  👤 Fetching person details (ID: ${record.person.id})...`);
+            const personData = await fetchPersonDetails(record.person.id);
+            if (personData && personData.data) {
+              crmData.personCrmId = personData.data.crm_id || null;
+              if (crmData.personCrmId) {
+                console.log(`  ✓ Salesforce Contact/Lead ID: ${crmData.personCrmId}`);
+              }
+            }
+          }
+
+          // Fetch account details if available
+          if (record.account?.id) {
+            console.log(`  🏢 Fetching account details (ID: ${record.account.id})...`);
+            const accountData = await fetchAccountDetails(record.account.id);
+            if (accountData && accountData.data) {
+              crmData.accountCrmId = accountData.data.crm_id || null;
+              if (crmData.accountCrmId) {
+                console.log(`  ✓ Salesforce Account ID: ${crmData.accountCrmId}`);
+              }
+            }
+          }
+        }
+
         // Save transcript to file with conversation data
         const { fileName, hasTranscript, isAITranscript, isManualNote } = await saveTranscriptToFile(
           record.id,
           record, // Pass the conversation record itself
           record, // Also use as callInfo
           driveAuth,
-          transcriptionId // Pass the transcriptionId directly
+          transcriptionId, // Pass the transcriptionId directly
+          crmData // Pass the CRM data
         );
 
         if (isAITranscript) {
