@@ -15,4 +15,6 @@ recordings/
 backups/
 data/*
 !data/.gitkeep
+!data/salesforce/
+!data/salesforce/*.csv
 .DS_Store
