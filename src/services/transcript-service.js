@@ -223,13 +223,15 @@ export class TranscriptService {
 
       console.log(`  ✓ Saved locally: ${fileName} (${contentType})`);
 
-      // Upload to Google Drive
-      if (googleDriveFolderId && this.googleDriveService.getAuthClient()) {
+      // Upload to Google Drive (skip for GitHub Actions - service accounts can't write to personal Drive)
+      if (!process.env.GITHUB_ACTIONS && googleDriveFolderId && this.googleDriveService.getAuthClient()) {
         try {
           await this.googleDriveService.uploadFile(fileName, content, googleDriveFolderId);
         } catch (error) {
           console.log(`  ⚠️  Google Drive upload failed, but file is saved locally`);
         }
+      } else if (process.env.GITHUB_ACTIONS) {
+        console.log(`  ⚠️  Skipping Drive upload (GitHub Actions - use local runs to upload)`);
       }
 
       // Save to CSV mapping file
