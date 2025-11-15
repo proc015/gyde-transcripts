@@ -10,11 +10,11 @@ gyde-transcript*.json
 debug_*.json
 processed_call_ids.json
 processed_conversation_ids.json
-transcript_salesforce_mapping.csv
 recordings/
 backups/
 data/*
 !data/.gitkeep
 !data/salesforce/
 !data/salesforce/*.csv
+!data/transcript_salesforce_mapping.csv
 .DS_Store
