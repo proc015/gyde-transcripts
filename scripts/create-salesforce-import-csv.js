@@ -276,62 +276,6 @@ fs.writeFileSync('./data/last_generation.json', JSON.stringify(metadata, null, 2
 
 console.log('   ✅ Combined CSV created!\n');
 
-// Step 5: Upload to Google Drive
-console.log('📊 Step 5/5: Uploading CSV to Google Drive...');
-
-async function uploadCSVToGoogleDrive() {
-  if (!authClient || !GOOGLE_DRIVE_FOLDER_ID) {
-    console.log('   ⚠️  Skipping upload - no Google Drive auth\n');
-    return;
-  }
-
-  try {
-    const drive = google.drive({ version: 'v3', auth: authClient });
-    const csvContent = fs.readFileSync(OUTPUT_CSV, 'utf8');
-
-    // Check if file already exists
-    const searchResponse = await drive.files.list({
-      q: `name='salesforce_import_ready.csv' and '${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false`,
-      fields: 'files(id, name)',
-      spaces: 'drive'
-    });
-
-    const fileMetadata = {
-      name: 'salesforce_import_ready.csv',
-      parents: [GOOGLE_DRIVE_FOLDER_ID]
-    };
-
-    const media = {
-      mimeType: 'text/csv',
-      body: csvContent
-    };
-
-    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-      // Update existing file
-      const fileId = searchResponse.data.files[0].id;
-      await drive.files.update({
-        fileId: fileId,
-        media: media,
-        fields: 'id, name, webViewLink'
-      });
-      console.log('   ✅ Updated existing CSV in Google Drive');
-    } else {
-      // Create new file
-      await drive.files.create({
-        requestBody: fileMetadata,
-        media: media,
-        fields: 'id, name, webViewLink'
-      });
-      console.log('   ✅ Uploaded new CSV to Google Drive');
-    }
-  } catch (error) {
-    console.error('   ⚠️  Upload to Drive failed:', error.message);
-  }
-}
-
-await uploadCSVToGoogleDrive();
-console.log('');
-
 // Summary
 console.log('═'.repeat(60));
 console.log('📊 SUMMARY:\n');
@@ -347,18 +291,12 @@ console.log(`📄 Metadata: ./data/last_generation.json`);
 console.log('═'.repeat(60));
 
 console.log('\n📋 NEXT STEPS:\n');
-console.log('1. Open the file in Excel to review:');
-console.log(`   ${OUTPUT_CSV}\n`);
-console.log('2. Verify the data looks correct:');
-console.log('   - Check ContactName and AccountName columns');
-console.log('   - Verify GoogleDriveURL links work');
-console.log('   - Look for any unexpected matches\n');
-console.log('3. When ready, import to Salesforce:');
+console.log('1. Get the CSV file:');
+if (process.env.GITHUB_ACTIONS) {
+  console.log('   - Download from GitHub Actions artifacts\n');
+} else {
+  console.log(`   - Local file: ${OUTPUT_CSV}\n`);
+}
+console.log('2. Import to Salesforce:');
 console.log('   - Use Salesforce Data Import Wizard or Data Loader');
-console.log('   - Follow: docs/SALESFORCE_TEST_IMPORT_GUIDE.md\n');
-console.log('4. Import just the matched records first (optional):');
-console.log('   - Filter to rows with "✅ Matched" status');
-console.log('   - Save as separate file for test import\n');
-
-console.log('💡 TIP: You can also run "npm run create-test-import"');
-console.log('   to create a 5-record test subset from this file.\n');
+console.log('   - Follow: docs/SALESFORCE_SAFE_IMPORT_STEPS.md\n');
