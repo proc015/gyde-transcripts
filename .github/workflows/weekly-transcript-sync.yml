@@ -34,15 +34,12 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
         run: npm run weekly-update
 
-      - name: Commit updated CSV
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add data/salesforce_import_ready.csv data/last_generation.json data/archive/
-          git diff --staged --quiet || git commit -m "chore: update Salesforce import CSV [automated]"
-
-      - name: Push changes
-        uses: ad-m/github-push-action@master
+      - name: Upload CSV as artifact
+        uses: actions/upload-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+          name: salesforce-import-csv
+          path: |
+            data/salesforce_import_ready.csv
+            data/last_generation.json
+            data/archive/
+          retention-days: 30
