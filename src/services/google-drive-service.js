@@ -7,6 +7,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 /**
  * Google Drive Service
  * Handles authentication and file uploads to Google Drive
+ * Supports both OAuth (local) and Service Account (GitHub Actions)
  */
 export class GoogleDriveService {
   constructor(credentialsPath, tokenPath) {
@@ -16,10 +17,57 @@ export class GoogleDriveService {
   }
 
   /**
-   * Authorize with Google Drive using OAuth
+   * Authorize with Google Drive
+   * Auto-detects: Service Account (if GOOGLE_SERVICE_ACCOUNT_KEY env var exists) or OAuth
    */
   async authorize() {
     try {
+      // Check if service account key is provided (for GitHub Actions)
+      if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+        return await this.authorizeServiceAccount();
+      }
+
+      // Otherwise use OAuth (for local development)
+      return await this.authorizeOAuth();
+    } catch (error) {
+      console.error('Error authorizing with Google Drive:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Authorize using Service Account (for automated environments like GitHub Actions)
+   */
+  async authorizeServiceAccount() {
+    try {
+      console.log('🔐 Using Service Account authentication...');
+
+      // Parse service account key from environment variable
+      const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+
+      // Create JWT auth client
+      const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccountKey,
+        scopes: SCOPES,
+      });
+
+      this.authClient = await auth.getClient();
+      console.log('✓ Service Account authenticated successfully');
+
+      return this.authClient;
+    } catch (error) {
+      console.error('Service Account authentication failed:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Authorize using OAuth (for local development)
+   */
+  async authorizeOAuth() {
+    try {
+      console.log('🔐 Using OAuth authentication...');
+
       // Load OAuth credentials
       const credentials = JSON.parse(fs.readFileSync(this.credentialsPath, 'utf8'));
       const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
@@ -31,6 +79,7 @@ export class GoogleDriveService {
         const token = JSON.parse(fs.readFileSync(this.tokenPath, 'utf8'));
         oAuth2Client.setCredentials(token);
         this.authClient = oAuth2Client;
+        console.log('✓ OAuth token loaded successfully');
         return oAuth2Client;
       }
 
@@ -64,7 +113,7 @@ export class GoogleDriveService {
       this.authClient = oAuth2Client;
       return oAuth2Client;
     } catch (error) {
-      console.error('Error authorizing with Google Drive:', error.message);
+      console.error('OAuth authentication failed:', error.message);
       throw error;
     }
   }
