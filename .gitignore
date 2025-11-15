@@ -4,6 +4,9 @@ node_modules/
 credentials.json
 oauth_credentials.json
 token.json
+*service-account*.json
+*-service-account.json
+gyde-transcript*.json
 debug_*.json
 processed_call_ids.json
 processed_conversation_ids.json

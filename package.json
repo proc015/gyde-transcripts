@@ -13,7 +13,13 @@
     "verify": "node scripts/verify.js",
     "cleanup-gdrive": "node scripts/cleanup-gdrive.js",
     "reset-gdrive": "node scripts/reset-gdrive.js",
-    "verify-gdrive": "node scripts/verify-gdrive.js"
+    "verify-gdrive": "node scripts/verify-gdrive.js",
+    "salesforce-test": "node scripts/create-test-subset.js",
+    "salesforce-check": "node scripts/check-salesforce-match.js",
+    "create-import-csv": "node scripts/create-salesforce-import-csv.js",
+    "verify-import": "node scripts/verify-import-data.js",
+    "weekly-update": "node scripts/weekly-automation.js",
+    "import-history": "node scripts/show-generation-history.js"
   },
   "keywords": [],
   "author": "",
