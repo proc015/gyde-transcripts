@@ -2,7 +2,7 @@ import fs from 'fs';
 import { google } from 'googleapis';
 import { Readable } from 'stream';
 
-const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 /**
  * Google Drive Service

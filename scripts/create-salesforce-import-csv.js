@@ -80,7 +80,7 @@ console.log(`   ✅ Loaded ${accountMap.size} Accounts\n`);
 // Step 2: Authorize Google Drive
 console.log('📊 Step 2/4: Connecting to Google Drive...');
 
-const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 async function authorizeGoogleDrive() {
   try {
@@ -275,6 +275,62 @@ const metadata = {
 fs.writeFileSync('./data/last_generation.json', JSON.stringify(metadata, null, 2), 'utf8');
 
 console.log('   ✅ Combined CSV created!\n');
+
+// Step 5: Upload to Google Drive
+console.log('📊 Step 5/5: Uploading CSV to Google Drive...');
+
+async function uploadCSVToGoogleDrive() {
+  if (!authClient || !GOOGLE_DRIVE_FOLDER_ID) {
+    console.log('   ⚠️  Skipping upload - no Google Drive auth\n');
+    return;
+  }
+
+  try {
+    const drive = google.drive({ version: 'v3', auth: authClient });
+    const csvContent = fs.readFileSync(OUTPUT_CSV, 'utf8');
+
+    // Check if file already exists
+    const searchResponse = await drive.files.list({
+      q: `name='salesforce_import_ready.csv' and '${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive'
+    });
+
+    const fileMetadata = {
+      name: 'salesforce_import_ready.csv',
+      parents: [GOOGLE_DRIVE_FOLDER_ID]
+    };
+
+    const media = {
+      mimeType: 'text/csv',
+      body: csvContent
+    };
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      // Update existing file
+      const fileId = searchResponse.data.files[0].id;
+      await drive.files.update({
+        fileId: fileId,
+        media: media,
+        fields: 'id, name, webViewLink'
+      });
+      console.log('   ✅ Updated existing CSV in Google Drive');
+    } else {
+      // Create new file
+      await drive.files.create({
+        requestBody: fileMetadata,
+        media: media,
+        fields: 'id, name, webViewLink'
+      });
+      console.log('   ✅ Uploaded new CSV to Google Drive');
+    }
+  } catch (error) {
+    console.error('   ⚠️  Upload to Drive failed:', error.message);
+  }
+}
+
+await uploadCSVToGoogleDrive();
+console.log('');
 
 // Summary
 console.log('═'.repeat(60));
