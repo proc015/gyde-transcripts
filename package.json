@@ -5,13 +5,18 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node test.js",
+    "batch": "node batch.js",
+    "clean": "node clean.js",
+    "verify": "node verify.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.3.1",
-    "axios": "^1.6.2"
+    "axios": "^1.6.2",
+    "googleapis": "^128.0.0"
   }
 }

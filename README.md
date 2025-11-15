@@ -1,6 +1,6 @@
-# Salesloft Call Transcripts Downloader
+# Salesloft Call Transcripts to Google Drive
 
-This script pulls call transcript TEXT from Salesloft via their API and saves them as text files locally.
+This script pulls call transcript TEXT from Salesloft via their API and uploads them to Google Drive.
 
 ## Setup Instructions
 
@@ -19,16 +19,74 @@ SALESLOFT_API_KEY=your_api_key_here
 
 ### 3. Run the Script
 
+**Option A: Test Mode (Quick Test - 15 transcripts)**
 ```bash
-npm start
+npm test
 ```
+
+**Option B: Batch Mode (Get ALL transcripts)**
+```bash
+npm run batch
+```
+
+Run batch mode multiple times to process all your calls:
+```bash
+npm run batch  # Run 1: Processes first batch
+npm run batch  # Run 2: Processes next batch (auto-skips duplicates)
+npm run batch  # Run 3: Continue until all calls processed
+```
+
+**Option C: Clean & Reset (Start fresh)**
+```bash
+npm run clean  # Resets the tracker (backs up old data)
+npm run batch  # Re-download all transcripts
+```
+
+**📖 New to this?**
+- **[HOW_IT_WORKS.md](./HOW_IT_WORKS.md)** - **START HERE!** Explains the tracking system & when to use each command
+- **[WHEN_TO_RUN.md](./docs/WHEN_TO_RUN.md)** - Quick reference guide
 
 ## What the Script Does
 
-1. Fetches call data records from Salesloft API (calls with dialer recordings)
-2. For each call, fetches the transcript text from the dialer recording
-3. Saves transcripts as text files in the `./recordings` folder
-4. Provides progress feedback and a summary
+1. Fetches call data records from Salesloft API with pagination support
+2. Applies smart filtering (completed calls, minimum duration, has activity ID)
+3. Checks for AI transcripts early to skip calls without transcription_id
+4. For calls with AI transcripts:
+   - Fetches ALL sentence pages (handles pagination automatically)
+   - Combines sentences into complete conversation transcripts
+   - Saves as text files locally and uploads to Google Drive
+5. Provides detailed progress tracking and summary statistics
+
+## Which Mode Should I Use?
+
+| Feature | Test Mode (`npm test`) | Batch Mode (`npm run batch`) | Clean Mode (`npm run clean`) |
+|---------|----------------------|----------------------------|----------------------------|
+| **Purpose** | Quick testing | Production data extraction | Reset & start fresh |
+| **Transcripts** | Stops at 15 | Unlimited (all available) | Clears tracker (no download) |
+| **Records Scanned** | 100 per run | 500 per run | N/A |
+| **Use Case** | Initial setup, spot-checking | Full historical backfill, ongoing sync | After bug fix, reset needed |
+| **Duplicate Prevention** | ✅ Yes | ✅ Yes | N/A (clears all history) |
+| **Run Multiple Times** | ✅ Yes | ✅ Yes (recommended) | Only when needed |
+
+## Configuration
+
+Settings are in `config.js` - you can adjust without modifying the main scripts:
+
+```javascript
+// Test mode settings
+test: {
+  TARGET_AI_TRANSCRIPTS: 15,  // Stop after finding 15
+  MAX_RECORDS_TO_SCAN: 100,   // Scan 100 records per run
+  MIN_DURATION: 30,            // Minimum call duration (seconds)
+}
+
+// Batch mode settings
+batch: {
+  MAX_RECORDS_TO_SCAN: 500,   // Scan 500 records per run
+  MIN_DURATION: 30,            // Minimum call duration (seconds)
+  API_DELAY_MS: 100,           // 100ms delay = 10 calls/sec
+}
+```
 
 ## Output
 
@@ -36,8 +94,26 @@ npm start
 - File naming format: `transcript_call_{callId}_{timestamp}.txt`
 - Each file includes:
   - Call metadata (ID, date, duration, phone numbers)
-  - Full transcript text
-- The script processes 5 calls at a time by default (change `per_page` in index.js to adjust)
+  - **Complete** AI-generated transcript text (all sentences, paginated automatically)
+
+### Console Output Indicators
+
+- `✅ AI TRANSCRIPT` - Full conversation transcript from AI speech-to-text
+- `⚠️ MANUAL NOTE ONLY` - User-typed summary (not conversation transcript)
+- `⊘ Skipped (no AI transcript)` - Call had no transcription_id, skipped early
+
+### Summary Statistics
+
+The script provides detailed statistics:
+```
+=== SUMMARY ===
+✓ Successfully processed: 8 calls
+  ✅ With AI transcripts: 5
+  ⚠️  With manual notes only: 2
+  ❌ Without any transcript: 1
+⊘ Skipped (no AI transcript): 32
+✗ Failed: 0 calls
+```
 
 ## After Download
 
@@ -49,10 +125,22 @@ Once the transcripts are downloaded to your computer, you can:
 
 ## Notes
 
-- The script only processes calls with dialer recordings that have transcripts
+- **Smart Filtering**: Only processes completed calls with minimum 30s duration
+- **AI Transcript Detection**: Automatically checks for `transcription_id` and skips calls without AI transcripts
+- **Complete Transcripts**: Handles pagination automatically to fetch ALL sentences (no truncation)
+- **Efficient**: Skips calls early if no AI transcript exists, saving ~80% of API calls
+- **Google Drive Upload**: Files are saved locally first, then uploaded to Google Drive
 - Files are plain text (.txt format)
-- The script will skip any calls without dialer recordings
 - If a transcript fails to download, the script continues with the next one
+
+## How AI Transcripts Work
+
+See [EXPLAINED.md](./docs/EXPLAINED.md) for a detailed technical explanation of:
+- The 3-step API process (Call Data → Conversation → Sentences)
+- How AI transcripts are detected and distinguished from manual notes
+- JSON schemas for each API endpoint
+- Pagination handling for complete transcripts
+- Scaling and performance optimizations
 
 ## Troubleshooting
 
@@ -63,3 +151,25 @@ Once the transcripts are downloaded to your computer, you can:
 ### "Error downloading recording"
 - The recording URL may have expired or be inaccessible
 - Check your network connection
+
+### "Duplicate transcripts with different call IDs"
+- This was a bug in earlier versions (now fixed!)
+- Run `npm run clean` to reset the tracker
+- Then run `npm run batch` to re-download with the fix
+
+---
+
+## 📚 Documentation
+
+Comprehensive guides are available in the `docs/` folder:
+
+### Getting Started
+- **[WHEN_TO_RUN.md](./docs/WHEN_TO_RUN.md)** - **START HERE!** Simple guide on when to use each command
+- **[QUICK_START.md](./docs/QUICK_START.md)** - Workflows, verification steps, and troubleshooting
+
+### Advanced Topics
+- **[BATCHING_GUIDE.md](./docs/BATCHING_GUIDE.md)** - Advanced batching strategies and scheduling
+- **[EXPLAINED.md](./docs/EXPLAINED.md)** - Technical deep-dive on API architecture and data flows
+
+### Production Deployment
+- **[NEXT_STEPS.md](./docs/NEXT_STEPS.md)** - 🚀 Roadmap for automated deployment on Render
