@@ -276,6 +276,55 @@ fs.writeFileSync('./data/last_generation.json', JSON.stringify(metadata, null, 2
 
 console.log('   ✅ Combined CSV created!\n');
 
+// Step 5: Upload to Google Drive (only for local/OAuth runs)
+if (!process.env.GITHUB_ACTIONS && authClient && GOOGLE_DRIVE_FOLDER_ID) {
+  console.log('📊 Step 5/5: Uploading CSV to Google Drive...');
+
+  try {
+    const drive = google.drive({ version: 'v3', auth: authClient });
+    const csvContent = fs.readFileSync(OUTPUT_CSV, 'utf8');
+
+    // Check if file already exists
+    const searchResponse = await drive.files.list({
+      q: `name='salesforce_import_ready.csv' and '${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive'
+    });
+
+    const fileMetadata = {
+      name: 'salesforce_import_ready.csv',
+      parents: [GOOGLE_DRIVE_FOLDER_ID]
+    };
+
+    const media = {
+      mimeType: 'text/csv',
+      body: csvContent
+    };
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      // Update existing file
+      const fileId = searchResponse.data.files[0].id;
+      await drive.files.update({
+        fileId: fileId,
+        media: media,
+        fields: 'id, name, webViewLink'
+      });
+      console.log('   ✅ Updated CSV in Google Drive\n');
+    } else {
+      // Create new file
+      await drive.files.create({
+        requestBody: fileMetadata,
+        media: media,
+        fields: 'id, name, webViewLink'
+      });
+      console.log('   ✅ Uploaded CSV to Google Drive\n');
+    }
+  } catch (error) {
+    console.error('   ⚠️  Upload to Drive failed:', error.message);
+    console.log('');
+  }
+}
+
 // Summary
 console.log('═'.repeat(60));
 console.log('📊 SUMMARY:\n');
