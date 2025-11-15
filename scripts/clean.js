@@ -15,7 +15,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const PROCESSED_IDS_FILE = './processed_call_ids.json';
+const PROCESSED_IDS_FILE = './data/processed_conversation_ids.json';
+const LEGACY_PROCESSED_IDS_FILE = './data/processed_call_ids.json';
 const BACKUP_FOLDER = './backups';
 
 console.log('╔═══════════════════════════════════════╗');
@@ -62,8 +63,14 @@ try {
     console.log('   This is normal if you haven\'t run the script yet');
   }
 
+  // Also clean up legacy processed IDs file if it exists
+  if (fs.existsSync(LEGACY_PROCESSED_IDS_FILE)) {
+    fs.unlinkSync(LEGACY_PROCESSED_IDS_FILE);
+    console.log('✓ Cleaned up legacy processed IDs file');
+  }
+
   // Also clean up debug files
-  const debugFiles = ['./debug_conversation.json', './debug_response.json'];
+  const debugFiles = ['./data/debug_conversation.json', './data/debug_response.json'];
   let debugFilesDeleted = 0;
 
   for (const debugFile of debugFiles) {

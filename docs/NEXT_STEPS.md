@@ -1,116 +1,233 @@
-# Next Steps: Production Deployment
+# Next Steps & Known Issues
 
-This document outlines the roadmap to transform this local script into a fully automated production system.
+## 🚀 START HERE - When You Resume Work
+
+**Last Session:** 2025-11-12
+**Status:** Successfully downloaded 34 phone call transcripts, duplicate prevention verified working
+
+**Your Next Tasks (In Order):**
+1. **Add Video Meeting Support** - Currently only getting phone calls, need to add video meetings (Zoom, Teams, etc.)
+2. **Deploy to Render** - Set up automated cron job to run every 24 hours or weekly
+3. **Test & Monitor** - Verify automated runs are working correctly
+
+**What's Working:**
+- ✅ Phone call transcript extraction (34 transcripts)
+- ✅ Duplicate prevention (tested and verified)
+- ✅ Pagination and state management
+- ✅ Google Drive upload
+
+**What's Missing:**
+- ⚠️ Video meeting transcripts (Zoom, Teams, etc.) - **THIS IS YOUR NEXT PRIORITY**
 
 ---
 
-## 🎯 Current Status
+## Current Status
+- ✅ Successfully fetching **phone call transcripts** from Salesloft
+- ✅ Duplicate prevention working correctly
+- ✅ Pagination and state management functional
+- ⚠️ **Only 34 AI transcripts found** - likely missing video meetings
 
-✅ **What's Working:**
-- Local test mode (`npm test`) - Gets 15 transcripts
-- Local batch mode (`npm run batch`) - Gets unlimited transcripts
-- Duplicate prevention via `processed_call_ids.json`
-- Google Drive OAuth integration
-- Complete AI transcript extraction with pagination
-- Comprehensive documentation
+## Known Limitation: Phone Calls Only
 
-⚠️ **What's Needed:**
-- Automated scheduled runs (cron job)
-- Cloud deployment (Render)
-- Production-ready error handling
-- Monitoring and alerts
+### Issue Discovered (2025-11-12)
+The current implementation only fetches transcripts from **phone calls** via the `/call_data_records.json` endpoint.
+
+**What's Missing:**
+- Video meeting transcripts (Zoom, Teams, Google Meet, etc.)
+- Other conversation types that may have AI transcripts
+
+### Why This Happened
+The script uses:
+```javascript
+// index.js:77
+axios.get(`${SALESLOFT_API_URL}/call_data_records.json`, {
+  params: { has_recording: true }
+})
+```
+
+This endpoint only returns **phone call** data records, not video meetings or other conversation types.
+
+### Evidence
+- Total conversations API returned: ~1200+ conversations (based on pagination)
+- Total AI transcripts saved: 34 (only phone calls)
+- Skipped conversations: ~268+ per batch (no AI transcript or already processed)
 
 ---
 
-## 📋 Roadmap
+## TODO: Add Video Meeting Support
 
-### Phase 1: Manual Process Verification ✅ (Complete This First)
+### Why Change the API Endpoint?
 
-**Goal:** Ensure the manual batch process reliably gets ALL transcripts before automating.
+**Current:** Uses `call_data_records.json` → Only returns phone calls
+**Problem:** Missing video meeting transcripts (Zoom, Teams, Google Meet, etc.)
+**Solution:** Use `conversations.json` → Returns ALL conversation types
 
-#### Tasks:
+### Required Changes
 
-**1. Full Historical Backfill**
+1. **Switch to Conversations Endpoint**
+   ```javascript
+   // OLD (index.js:77)
+   axios.get(`${SALESLOFT_API_URL}/call_data_records.json`, {
+     params: { has_recording: true }
+   })
+
+   // NEW
+   axios.get(`${SALESLOFT_API_URL}/conversations.json`, {
+     params: { per_page: 100 }
+   })
+   ```
+
+2. **Filter by Transcription Existence**
+   ```javascript
+   // Only process conversations that have transcriptions
+   const recordsToProcess = conversations.filter(conv =>
+     conv.transcription && conv.transcription.id
+   );
+   ```
+
+3. **Track Media Type**
+   ```javascript
+   // Add to saved transcript files
+   content += `Media Type: ${conversation.media_type || 'unknown'}\n`;
+   content += `Platform: ${conversation.platform || 'unknown'}\n`;
+   ```
+
+### API Investigation Needed
+- [ ] Query `/conversations.json` and check `media_type` field values
+- [ ] Verify video meetings have `transcription_id` populated
+- [ ] Test fetching sentences for video meeting transcriptions
+- [ ] Check if different platforms (Zoom/Teams/etc.) require different handling
+
+### Example Query to Test
 ```bash
-# Run batch mode until you have all historical transcripts
-npm run batch
-npm run batch
-npm run batch
-# ... continue until "Found 0 new transcripts"
-```
-
-**Verify:**
-- [ ] Ran batch mode multiple times
-- [ ] Summary shows "Found 0 new transcripts"
-- [ ] `processed_call_ids.json` has substantial count (100s or 1000s)
-- [ ] Google Drive folder has all transcript files
-- [ ] Spot-checked 5-10 transcripts for quality
-
-**Success Criteria:**
-```
-=== SUMMARY ===
-✅ Found this run: 0 AI transcripts
-📋 Total processed (all time): 2,847 calls
-⏭️  Skipped 500 already processed calls
+curl -H "Authorization: Bearer $SALESLOFT_API_KEY" \
+  "https://api.salesloft.com/v2/conversations.json?per_page=5" \
+  | jq '.data[] | {media_type, platform, has_transcription: .transcription.id}'
 ```
 
 ---
 
-**2. Test Daily Incremental Updates**
+## Recommended Cleanup Items
 
-Wait 24 hours after full backfill, then:
+### 1. Remove Debug Files
 ```bash
-npm run batch
+# These files are regenerated on each run
+rm debug_response.json
+rm debug_conversation.json
 ```
 
-**Verify:**
-- [ ] Only processes new calls from past 24 hours
-- [ ] Skips all previously processed calls
-- [ ] Finds 0-20 new transcripts (depending on call volume)
-- [ ] Takes < 5 minutes
-- [ ] All new files uploaded to Google Drive
+### 2. Add `.gitignore` Entries
+```gitignore
+# Add to .gitignore
+debug_*.json
+recordings/
+processed_call_ids.json
+backups/
+token.json
+oauth_credentials.json
+.env
+```
 
-**Success Criteria:**
+### 3. Create Stats/Validation Script
+Add a script to verify what's been downloaded:
+```javascript
+// verify.js - Already exists! Good.
+// Could enhance with:
+// - Count by media type (phone vs video)
+// - List calls without transcripts
+// - Summary by date range
 ```
-⏭️  Skipped 2,847 already processed calls  ← Most calls skipped
-✅ Found this run: 8 AI transcripts         ← Only new ones
-```
+
+### 4. Add Better Logging
+Consider adding a log file that tracks:
+- Run timestamp
+- Records scanned
+- Transcripts found
+- Errors encountered
+- Media type breakdown
 
 ---
 
-**3. Document Your Manual Process**
+## Production Readiness Checklist
 
-Create a simple checklist for running manually:
-
-**Daily Manual Run Checklist:**
-```
-□ Open terminal
-□ Navigate to project: cd /path/to/gyde-transcripts
-□ Run batch: npm run batch
-□ Wait for completion (2-5 minutes)
-□ Verify Google Drive uploads
-□ Note transcript count in log/spreadsheet
-```
+- [x] Duplicate prevention working
+- [x] Pagination state management
+- [x] Progress saving (every 10 calls)
+- [x] Auto-backup of tracking file
+- [ ] **Video meeting support** (HIGH PRIORITY)
+- [ ] Error handling for API rate limits
+- [ ] Retry logic for failed API calls
+- [ ] Better logging/audit trail
+- [ ] Stats dashboard or summary report
 
 ---
 
-### Phase 2: Prepare for Render Deployment
+## How to Resume Work
 
-**Goal:** Make the script cloud-ready and configure for automated runs.
+### When Adding Video Meeting Support:
 
-#### Tasks:
+1. **Test the hypothesis**
+   ```bash
+   npm run verify  # Check current state
+   ```
 
-**1. Create Render-Specific Configuration**
+2. **Investigate API**
+   - Check what `media_type` values exist in your Salesloft conversations
+   - Confirm video meetings have `transcription.id`
 
-Create `render.yaml`:
+3. **Modify `index.js`**
+   - Change primary data source from `call_data_records` to `conversations`
+   - Remove filters that limit to phone calls only
+   - Add `media_type` tracking to saved files
+
+4. **Test incrementally**
+   ```bash
+   npm test  # Test with limited records first
+   ```
+
+5. **Run full batch**
+   ```bash
+   npm run batch  # Process all conversations
+   ```
+
+### Files to Modify
+- `index.js` - Main fetching logic (lines 67-125)
+- `config.js` - Potentially add media_type filters
+- `verify.js` - Add media type stats
+
+---
+
+## Notes for Future You
+
+**Don't forget:** The current setup is working perfectly for phone calls! When you add video support:
+- Keep the same duplicate prevention logic (it's solid)
+- Keep the pagination strategy (it works)
+- Just change the data source from `call_data_records` to `conversations`
+- Test with `npm test` before running full batch
+
+The architecture is good - you just need to widen the net to catch video meetings too!
+
+---
+
+## Deploy to Render with Automated Cron Jobs
+
+### Goal
+Run the transcript extraction automatically every 24 hours (or weekly) without manual intervention.
+
+### Setup Steps
+
+#### 1. **Prepare the Repository**
+
+Add a `render.yaml` file to the root:
 ```yaml
 services:
   - type: cron
-    name: salesloft-transcript-sync
+    name: gyde-transcripts-sync
     env: node
+    plan: free
+    schedule: "0 0 * * *"  # Run daily at midnight UTC
     buildCommand: npm install
     startCommand: npm run batch
-    schedule: "0 2 * * *"  # Daily at 2 AM UTC
     envVars:
       - key: SALESLOFT_API_KEY
         sync: false
@@ -118,385 +235,246 @@ services:
         sync: false
 ```
 
-**2. Update for Stateless Deployment**
+**Alternative schedules:**
+- `0 0 * * *` - Daily at midnight
+- `0 0 * * 0` - Weekly on Sunday at midnight
+- `0 */6 * * *` - Every 6 hours
 
-Since Render cron jobs are stateless, we need to store `processed_call_ids.json` remotely.
+#### 2. **Create Entry Point Script**
 
-**Options:**
-- **Option A:** Store in Google Drive (recommended)
-- **Option B:** Use Render's persistent disk
-- **Option C:** Use external database (Postgres/MongoDB)
-
-**Recommended: Store tracking file in Google Drive**
-
-Create `lib/storage.js`:
+Create `render-sync.js`:
 ```javascript
-// Download processed_call_ids.json from Google Drive at start
-// Upload processed_call_ids.json to Google Drive at end
+#!/usr/bin/env node
+
+import { main } from './index.js';
+import { getConfig } from './config.js';
+
+console.log('🤖 Automated Render Sync Starting...');
+console.log('Timestamp:', new Date().toISOString());
+
+const config = getConfig('batch');
+
+main(config)
+  .then(() => {
+    console.log('✅ Sync completed successfully');
+    process.exit(0);
+  })
+  .catch(error => {
+    console.error('❌ Sync failed:', error);
+    process.exit(1);
+  });
 ```
 
-**3. Add Error Handling & Notifications**
-
-Create `lib/notifications.js`:
-```javascript
-// Send email/Slack notification on:
-// - Successful run (daily summary)
-// - Errors/failures
-// - No transcripts found for 7 days (warning)
-```
-
-**4. Add Logging**
-
-Replace `console.log` with proper logging:
-```javascript
-import winston from 'winston';
-
-// Log to file + console
-// Retain last 30 days of logs
-```
-
----
-
-### Phase 3: Deploy to Render
-
-**Goal:** Get the automated cron job running on Render.
-
-#### Prerequisites:
-
-- [ ] Render account created (free tier works)
-- [ ] GitHub repo created (optional but recommended)
-- [ ] Environment variables documented
-
-#### Tasks:
-
-**1. Create Render Cron Job**
-
-Via Render Dashboard:
-1. New → Cron Job
-2. Connect GitHub repo (or upload manually)
-3. Environment: Node
-4. Build command: `npm install`
-5. Start command: `npm run batch`
-6. Schedule: `0 2 * * *` (daily 2 AM)
-
-**2. Configure Environment Variables**
-
-In Render dashboard, add:
-```
-SALESLOFT_API_KEY=v2_ak_...
-GOOGLE_DRIVE_FOLDER_ID=1Xi4wJ...
-```
-
-**3. Handle Google OAuth on Render**
-
-**Challenge:** OAuth requires interactive browser login.
-
-**Solutions:**
-
-**Option A: Pre-authenticate locally, upload token**
-```bash
-# Run locally first to get token.json
-npm test
-# Upload token.json contents as env var TOKEN_JSON in Render
-```
-
-**Option B: Use Service Account (if possible)**
-- Create Google Cloud Service Account
-- Share Drive folder with service account email
-- Use service account credentials instead of OAuth
-
-**Option C: Refresh token approach**
-- Get refresh token locally
-- Store as env var
-- Script regenerates access tokens automatically
-
-**Recommended: Option A for simplicity**
-
----
-
-**4. Test Render Deployment**
-
-**Manual test:**
-1. Deploy to Render
-2. Trigger manual run from Render dashboard
-3. Check logs for success
-4. Verify Google Drive uploads
-5. Check `processed_call_ids.json` updated
-
-**Cron test:**
-1. Set schedule to run every hour temporarily: `0 * * * *`
-2. Wait for automatic run
-3. Verify it ran successfully
-4. Reset to daily schedule: `0 2 * * *`
-
----
-
-### Phase 4: Monitoring & Maintenance
-
-**Goal:** Ensure long-term reliability and visibility.
-
-#### Tasks:
-
-**1. Set Up Monitoring Dashboard**
-
-Track:
-- ✅ Daily runs completed
-- ✅ Number of new transcripts per day
-- ✅ Total transcripts processed
-- ⚠️ Failed runs
-- ⚠️ API errors
-- ⚠️ Google Drive quota warnings
-
-**Tools:**
-- Render dashboard (basic)
-- Google Sheets (log daily stats)
-- Datadog/New Relic (advanced)
-
-**2. Create Alerts**
-
-Alert when:
-- ❌ Cron job fails to run
-- ❌ No transcripts found for 7 consecutive days
-- ⚠️ API rate limit exceeded
-- ⚠️ Google Drive storage > 90%
-
-**3. Weekly Review Process**
-
-Every Monday:
-- [ ] Review past week's transcript counts
-- [ ] Check for any failed runs
-- [ ] Spot-check 2-3 recent transcripts for quality
-- [ ] Review Google Drive folder organization
-
-**4. Monthly Maintenance**
-
-Every month:
-- [ ] Review and archive old transcripts (if needed)
-- [ ] Check Google Drive storage usage
-- [ ] Update dependencies: `npm outdated`
-- [ ] Review processed_call_ids.json size
-
----
-
-## 🚀 Quick Start Guide (After Manual Testing)
-
-Once Phase 1 is complete:
-
-### Deploy to Render (10 minutes)
-
-**Step 1: Prepare Environment Variables**
-```bash
-# Get these values from your local .env
-cat .env
-
-# Get your OAuth token
-cat token.json
-```
-
-**Step 2: Create Render Cron Job**
-1. Go to https://render.com
-2. New → Cron Job
-3. Name: `salesloft-transcript-sync`
-4. Environment: `Node`
-5. Build Command: `npm install`
-6. Start Command: `npm run batch`
-7. Schedule: `0 2 * * *`
-
-**Step 3: Add Environment Variables**
-```
-SALESLOFT_API_KEY = <from .env>
-GOOGLE_DRIVE_FOLDER_ID = <from .env>
-TOKEN_JSON = <contents of token.json>
-```
-
-**Step 4: Update Code for Render**
-
-Edit `index.js` to load token from env var:
-```javascript
-// At top of authorizeGoogleDrive()
-if (process.env.TOKEN_JSON) {
-  const token = JSON.parse(process.env.TOKEN_JSON);
-  oAuth2Client.setCredentials(token);
-  return oAuth2Client;
+Update `package.json`:
+```json
+{
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test.js",
+    "batch": "node batch.js",
+    "sync": "node render-sync.js",
+    "clean": "node clean.js",
+    "verify": "node verify.js"
+  }
 }
 ```
 
-**Step 5: Deploy & Test**
-1. Push code to GitHub (or upload)
-2. Render auto-deploys
-3. Click "Trigger Run" for manual test
-4. Check logs
-5. Verify Google Drive
+#### 3. **Handle Google OAuth on Render**
 
----
-
-## 📊 Success Metrics
-
-### Phase 1 (Manual) - Week 1
-- [ ] Processed 100% of historical calls
-- [ ] 0 duplicate transcripts
-- [ ] Successfully ran daily sync 7 days in a row
-- [ ] < 5% error rate
-
-### Phase 2 (Prepare) - Week 2
-- [ ] render.yaml created
-- [ ] Storage solution implemented
-- [ ] Error handling added
-- [ ] Notifications configured
-
-### Phase 3 (Deploy) - Week 3
-- [ ] Successfully deployed to Render
-- [ ] Cron job running daily
-- [ ] 100% success rate for 7 days
-- [ ] All transcripts uploading to Drive
-
-### Phase 4 (Monitor) - Ongoing
-- [ ] Dashboard showing daily metrics
-- [ ] Alerts configured and tested
-- [ ] Weekly review process established
-- [ ] Zero missed days in past month
-
----
-
-## 🛠️ Troubleshooting Production Issues
-
-### Issue: Render cron job fails
-
-**Check:**
-1. Render logs for error messages
-2. Environment variables set correctly
-3. TOKEN_JSON valid and not expired
-4. Salesloft API key still active
-
-**Fix:**
-```bash
-# Re-authenticate locally
-rm token.json
-npm test
-# Copy new token.json to Render env var
-```
-
----
-
-### Issue: Processed_call_ids.json not persisting
-
-**Cause:** Render cron jobs are stateless
-
-**Fix:** Implement Google Drive storage:
-```javascript
-// Before processing
-await downloadProcessedIdsFromDrive();
-
-// After processing
-await uploadProcessedIdsToDrive();
-```
-
----
-
-### Issue: Hitting API rate limits
-
-**Cause:** Too many requests
-
-**Fix in config.js:**
-```javascript
-batch: {
-  API_DELAY_MS: 500,  // Slow down to 2 calls/sec
-}
-```
-
----
-
-### Issue: Google Drive quota exceeded
-
-**Cause:** Too many files
-
-**Solutions:**
-1. Archive old transcripts to separate folder
-2. Compress transcripts before upload
-3. Use Google Workspace for unlimited storage
-4. Delete duplicate/test files
-
----
-
-## 📁 Recommended Project Structure (Production)
-
-```
-gyde-transcripts/
-├── lib/
-│   ├── storage.js         ← Google Drive storage for tracking file
-│   ├── notifications.js   ← Email/Slack alerts
-│   └── logger.js          ← Winston logging
-│
-├── config/
-│   ├── development.js     ← Local dev config
-│   └── production.js      ← Render production config
-│
-├── scripts/
-│   ├── deploy.sh          ← Deployment helper
-│   └── backup.sh          ← Backup processed IDs
-│
-├── docs/                  ← Documentation (existing)
-├── test.js               ← Test mode (existing)
-├── batch.js              ← Batch mode (existing)
-├── index.js              ← Core logic (existing)
-├── render.yaml           ← Render configuration
-└── .github/
-    └── workflows/
-        └── deploy.yml     ← Auto-deploy on push
-```
-
----
-
-## 🎯 Current Priority: Phase 1
-
-**Focus on completing Phase 1 before moving to automation:**
+**Problem:** OAuth requires browser interaction for first-time auth
+**Solution:** Pre-authenticate locally, then upload token
 
 ```bash
-# Run this daily for 1 week
+# 1. Run locally to generate token
 npm run batch
+
+# 2. Check that token.json was created
+ls -la token.json
+
+# 3. Add token.json contents as environment variable on Render
+# In Render dashboard: Add env var GOOGLE_OAUTH_TOKEN
+# Value: Copy entire contents of token.json
 ```
 
-**Track in a spreadsheet:**
-| Date | Run Time | New Transcripts | Total Processed | Errors |
-|------|----------|-----------------|-----------------|--------|
-| 11/12 | 3:47 min | 47 | 2,847 | 0 |
-| 11/13 | 2:15 min | 12 | 2,859 | 0 |
-| 11/14 | 1:58 min | 8 | 2,867 | 0 |
+Update `index.js` to check for env var:
+```javascript
+async function authorizeGoogleDrive() {
+  try {
+    const credentials = JSON.parse(fs.readFileSync(OAUTH_CREDENTIALS_PATH, 'utf8'));
+    const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
+    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
 
-**After 1 week of successful manual runs → Move to Phase 2**
+    // Check for token from environment variable (for Render)
+    if (process.env.GOOGLE_OAUTH_TOKEN) {
+      const token = JSON.parse(process.env.GOOGLE_OAUTH_TOKEN);
+      oAuth2Client.setCredentials(token);
+      return oAuth2Client;
+    }
+
+    // Check for local token file
+    if (fs.existsSync(TOKEN_PATH)) {
+      const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+      oAuth2Client.setCredentials(token);
+      return oAuth2Client;
+    }
+
+    // ... existing authorization code ...
+  }
+}
+```
+
+#### 4. **Deploy to Render**
+
+1. **Push to GitHub**
+   ```bash
+   git add .
+   git commit -m "Add Render deployment config"
+   git push origin main
+   ```
+
+2. **Create Render Account**
+   - Go to https://render.com
+   - Sign up / Sign in with GitHub
+
+3. **Create New Cron Job**
+   - Dashboard → New → Cron Job
+   - Connect your GitHub repo
+   - Render will auto-detect `render.yaml`
+   - Add environment variables:
+     - `SALESLOFT_API_KEY` = your API key
+     - `GOOGLE_DRIVE_FOLDER_ID` = your folder ID
+     - `GOOGLE_OAUTH_TOKEN` = contents of token.json
+
+4. **Enable Persistent Storage** (Important!)
+   - Render cron jobs are stateless by default
+   - Need to persist `processed_call_ids.json` between runs
+   - In Render dashboard:
+     - Add Disk: `/opt/render/project/src/data`
+     - Update paths in code to use `/opt/render/project/src/data/processed_call_ids.json`
+
+#### 5. **Update File Paths for Persistence**
+
+Create `paths.js`:
+```javascript
+import path from 'path';
+
+// Use persistent disk on Render, local folder otherwise
+const DATA_DIR = process.env.RENDER
+  ? '/opt/render/project/src/data'
+  : './';
+
+export const PATHS = {
+  PROCESSED_IDS: path.join(DATA_DIR, 'processed_call_ids.json'),
+  RECORDINGS: path.join(DATA_DIR, 'recordings'),
+  BACKUPS: path.join(DATA_DIR, 'backups')
+};
+```
+
+Update `index.js` to import and use these paths.
+
+#### 6. **Add Monitoring & Notifications**
+
+**Option A: Email notifications**
+Add to `render-sync.js`:
+```javascript
+import nodemailer from 'nodemailer';
+
+async function sendNotification(stats) {
+  // Configure email service (SendGrid, Gmail, etc.)
+  // Send summary of run
+}
+```
+
+**Option B: Slack webhook**
+```javascript
+async function notifySlack(message) {
+  await axios.post(process.env.SLACK_WEBHOOK_URL, {
+    text: message
+  });
+}
+```
+
+**Option C: Use Render logs**
+- Render keeps logs of all cron runs
+- Check dashboard for run history and errors
+
+### Testing Deployment
+
+```bash
+# 1. Test the sync command locally
+npm run sync
+
+# 2. Verify it creates/updates processed_call_ids.json
+cat processed_call_ids.json
+
+# 3. Run again to verify no duplicates
+npm run sync
+
+# 4. Check file count
+ls -la recordings/ | wc -l
+```
+
+### Post-Deployment Checklist
+
+- [ ] Cron job created on Render
+- [ ] Environment variables set
+- [ ] Persistent disk configured
+- [ ] OAuth token working
+- [ ] Test run successful (check Render logs)
+- [ ] Verify files uploading to Google Drive
+- [ ] Monitor for 1 week to ensure stability
+- [ ] Set up alerts for failures (optional)
+
+### Troubleshooting Render
+
+**Issue: Token expired**
+- Regenerate locally
+- Update `GOOGLE_OAUTH_TOKEN` env var on Render
+
+**Issue: Disk full**
+- Recordings are uploaded to Google Drive, safe to delete locally
+- Add cleanup step to `render-sync.js`
+
+**Issue: Rate limiting**
+- Salesloft API has rate limits
+- Adjust `API_DELAY_MS` in config
+- Consider running less frequently (weekly instead of daily)
+
+### Cost Estimate
+- **Render Free Tier:** 750 hours/month of cron jobs (enough for daily runs)
+- **Google Drive:** Free (15GB storage)
+- **Total Cost:** $0/month for moderate usage
 
 ---
 
-## 📞 Questions Before Proceeding?
+## Alternative: GitHub Actions (Optional)
 
-Before starting Render deployment, confirm:
+If you prefer not to use Render, you can use GitHub Actions:
 
-- [ ] Have you completed full historical backfill? (Phase 1 complete)
-- [ ] Did daily manual runs work for at least 3 days in a row?
-- [ ] Do you have a Render account (or want to use different platform)?
-- [ ] Do you want notifications (email/Slack)?
-- [ ] Any specific monitoring requirements?
+```yaml
+# .github/workflows/sync-transcripts.yml
+name: Sync Salesloft Transcripts
 
----
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight
+  workflow_dispatch:  # Allow manual trigger
 
-## 🚦 Go/No-Go Decision
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - run: npm install
+      - run: npm run sync
+        env:
+          SALESLOFT_API_KEY: ${{ secrets.SALESLOFT_API_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_OAUTH_TOKEN: ${{ secrets.GOOGLE_OAUTH_TOKEN }}
+```
 
-**Ready to proceed to Render deployment when:**
-
-✅ Phase 1 complete (all historical transcripts extracted)
-✅ Daily manual runs successful for 1 week
-✅ No errors in processing
-✅ Google Drive uploads working 100%
-✅ Comfortable with manual process
-
-**NOT ready if:**
-❌ Still finding new transcripts in backfill
-❌ Errors occurring frequently
-❌ Google Drive uploads failing
-❌ Not confident in manual process
-
----
-
-**Current Status: Phase 1 - Manual Process Verification**
-
-**Next Action:** Run `npm run batch` daily for 1 week to verify stability before automating.
+**Pros:** Free, integrated with GitHub, easy to set up
+**Cons:** No persistent storage (would need to download/upload processed_call_ids.json to/from GitHub repo)

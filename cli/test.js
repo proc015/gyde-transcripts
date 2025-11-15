@@ -13,8 +13,8 @@
  * Run with: npm test
  */
 
-import { main } from './index.js';
-import { getConfig } from './config.js';
+import { main } from '../src/main.js';
+import { getConfig } from '../config/config.js';
 
 console.log('╔═══════════════════════════════════════╗');
 console.log('║       🧪 TEST MODE - SALESLOFT        ║');

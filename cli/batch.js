@@ -25,8 +25,8 @@
  * 4. Repeat until you see "Found 0 new transcripts"
  */
 
-import { main } from './index.js';
-import { getConfig } from './config.js';
+import { main } from '../src/main.js';
+import { getConfig } from '../config/config.js';
 
 console.log('╔═══════════════════════════════════════╗');
 console.log('║    📦 BATCH MODE - SALESLOFT          ║');

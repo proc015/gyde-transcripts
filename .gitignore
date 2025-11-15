@@ -6,6 +6,10 @@ oauth_credentials.json
 token.json
 debug_*.json
 processed_call_ids.json
+processed_conversation_ids.json
+transcript_salesforce_mapping.csv
 recordings/
 backups/
+data/*
+!data/.gitkeep
 .DS_Store

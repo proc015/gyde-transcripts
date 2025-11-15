@@ -6,13 +6,14 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "test": "node test.js",
-    "batch": "node batch.js",
-    "analyze": "node analyze.js",
-    "clean": "node clean.js",
-    "verify": "node verify.js",
-    "cleanup-gdrive": "node cleanup-gdrive.js",
-    "reset-gdrive": "node reset-gdrive.js"
+    "test": "node cli/test.js",
+    "batch": "node cli/batch.js",
+    "analyze": "node scripts/analyze.js",
+    "clean": "node scripts/clean.js",
+    "verify": "node scripts/verify.js",
+    "cleanup-gdrive": "node scripts/cleanup-gdrive.js",
+    "reset-gdrive": "node scripts/reset-gdrive.js",
+    "verify-gdrive": "node scripts/verify-gdrive.js"
   },
   "keywords": [],
   "author": "",
