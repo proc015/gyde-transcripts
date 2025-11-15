@@ -36,10 +36,34 @@ export class GoogleDriveService {
   }
 
   /**
-   * Authorize using Service Account (for automated environments like GitHub Actions)
+   * Authorize using Service Account OR OAuth from env vars (for GitHub Actions)
    */
   async authorizeServiceAccount() {
     try {
+      // Check if OAuth credentials are provided in env vars (preferred for GitHub Actions)
+      if (process.env.GOOGLE_OAUTH_CLIENT_ID &&
+          process.env.GOOGLE_OAUTH_CLIENT_SECRET &&
+          process.env.GOOGLE_OAUTH_REFRESH_TOKEN) {
+
+        console.log('🔐 Using OAuth authentication (from env vars)...');
+
+        const oAuth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_OAUTH_CLIENT_ID,
+          process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+          'http://localhost' // redirect URI (not used for refresh)
+        );
+
+        // Set refresh token to get new access tokens automatically
+        oAuth2Client.setCredentials({
+          refresh_token: process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+        });
+
+        this.authClient = oAuth2Client;
+        console.log('✓ OAuth authenticated successfully (from env)');
+        return this.authClient;
+      }
+
+      // Fallback to service account
       console.log('🔐 Using Service Account authentication...');
 
       // Parse service account key from environment variable
@@ -56,7 +80,7 @@ export class GoogleDriveService {
 
       return this.authClient;
     } catch (error) {
-      console.error('Service Account authentication failed:', error.message);
+      console.error('Authentication failed:', error.message);
       throw error;
     }
   }
