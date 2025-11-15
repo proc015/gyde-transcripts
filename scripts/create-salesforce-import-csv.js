@@ -276,13 +276,19 @@ fs.writeFileSync('./data/last_generation.json', JSON.stringify(metadata, null, 2
 
 console.log('   ✅ Combined CSV created!\n');
 
-// Step 5: Upload to Google Drive (only for local/OAuth runs)
-if (!process.env.GITHUB_ACTIONS && authClient && GOOGLE_DRIVE_FOLDER_ID) {
+// Step 5: Upload to Google Drive
+if (authClient && GOOGLE_DRIVE_FOLDER_ID) {
   console.log('📊 Step 5/5: Uploading CSV to Google Drive...');
 
   try {
     const drive = google.drive({ version: 'v3', auth: authClient });
+
+    // Create a readable stream from the CSV (same way transcripts are uploaded)
+    const { Readable } = await import('stream');
     const csvContent = fs.readFileSync(OUTPUT_CSV, 'utf8');
+    const bufferStream = new Readable();
+    bufferStream.push(csvContent);
+    bufferStream.push(null);
 
     // Check if file already exists
     const searchResponse = await drive.files.list({
@@ -293,12 +299,13 @@ if (!process.env.GITHUB_ACTIONS && authClient && GOOGLE_DRIVE_FOLDER_ID) {
 
     const fileMetadata = {
       name: 'salesforce_import_ready.csv',
-      parents: [GOOGLE_DRIVE_FOLDER_ID]
+      parents: [GOOGLE_DRIVE_FOLDER_ID],
+      mimeType: 'text/csv'
     };
 
     const media = {
       mimeType: 'text/csv',
-      body: csvContent
+      body: bufferStream
     };
 
     if (searchResponse.data.files && searchResponse.data.files.length > 0) {
